@@ -113,6 +113,8 @@
 
   .search-row { display: flex; gap: 8px; margin-bottom: 14px; position: relative; }
   .search-box { flex: 1; display: flex; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; }
+  .search-clear-btn { background: none; border: none; color: var(--muted-dark); font-size: 14px; cursor: pointer; padding: 4px 2px; flex-shrink: 0; }
+  .search-clear-btn:hover { color: var(--text); }
   .search-box input { flex: 1; background: none; border: none; color: var(--text); padding: 10px 8px; font-size: 14px; }
   .btn-gold { display: flex; align-items: center; gap: 6px; background: var(--gold); color: var(--bg); border: none; border-radius: 10px; padding: 0 16px; font-weight: 600; font-size: 14px; cursor: pointer; }
   .suggest-dropdown { position: absolute; top: calc(100% + 6px); left: 0; right: 68px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 6px; z-index: 30; max-height: 320px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
@@ -141,7 +143,7 @@
   .poster { aspect-ratio: 2 / 3; position: relative; display: flex; align-items: center; justify-content: center; background-size: cover; background-position: center; overflow: hidden; }
   .poster img { width: 100%; height: 100%; object-fit: cover; object-position: center top; }
   .poster-initials { font-family: Georgia, serif; font-size: 28px; color: rgba(245,241,232,0.85); letter-spacing: 1px; }
-  .badge-type { position: absolute; top: 8px; left: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; background: rgba(18,16,26,0.7); color: var(--muted); padding: 3px 7px; border-radius: 999px; display: flex; align-items: center; gap: 4px; }
+  .badge-type { position: absolute; top: 8px; left: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; background: rgba(18,16,26,0.7); color: #D8D3E8; padding: 3px 7px; border-radius: 999px; display: flex; align-items: center; gap: 4px; }
   .poster-footer { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(18,16,26,0.78); color: var(--gold); font-size: 11px; text-align: center; padding: 4px 6px; font-weight: 600; }
   .quickmark-btn { position: absolute; bottom: 58px; right: 8px; width: 38px; height: 38px; border-radius: 50%; background: rgba(18,16,26,0.4); border: 1.5px solid rgba(245,241,232,0.55); backdrop-filter: blur(1px); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 120ms ease; }
   .quickmark-btn:hover { background: rgba(232,179,76,0.55); border-color: var(--gold); }
@@ -285,6 +287,7 @@ let state = {
   providerSearchQuery: '',
   suggestionAdding: null, // `${type}:${tmdbId}` currently being added
   showImportPaste: false,
+  collectionOffer: null, // { sourceTitle, name, movies: [{id,title,posterPath,overview,releaseDate,year,selected}] }
   mobileSearchOpen: false,
   suggestionGenre: null, // selected genre id for the "Top genre" section (set on first load)
   suggestionCategory: 'series', // 'series' | 'movie' — which tab is shown
@@ -623,6 +626,21 @@ async function ensureProvidersLoaded(item) {
 }
 const ACTOR_REGISTRY = {};
 
+function spacingVariants(q) {
+  if (q.includes(' ') || q.length < 5) return [];
+  const positions = [];
+  const mid = Math.floor(q.length / 2);
+  for (let offset = 0; offset < q.length && positions.length < 4; offset++) {
+    for (const sign of offset === 0 ? [0] : [1, -1]) {
+      const pos = mid + sign * offset;
+      if (pos >= 2 && pos <= q.length - 2 && !positions.includes(pos)) {
+        positions.push(pos);
+        if (positions.length >= 4) break;
+      }
+    }
+  }
+  return positions.sort((a, b) => a - b).map((pos) => q.slice(0, pos) + ' ' + q.slice(pos));
+}
 async function tmdbSearch(query, type) {
   const path = type === 'movie' ? 'search/movie' : 'search/tv';
   const url = `https://api.themoviedb.org/3/${path}?api_key=${encodeURIComponent(state.apiKey)}&query=${encodeURIComponent(query)}&language=fr-FR`;
@@ -715,6 +733,8 @@ function normalizeTmdb(details, type) {
     synopsis: details.overview || '',
     director, studio, country, genre, castList, seasons,
     tmdbId: details.id, nextEpisodeDate, airedCount, releaseDate, episodeRuntime, runtime, tmdbStatus,
+    collectionId: (type === 'movie' && details.belongs_to_collection) ? details.belongs_to_collection.id : null,
+    collectionName: (type === 'movie' && details.belongs_to_collection) ? details.belongs_to_collection.name : null,
   };
 }
 
@@ -754,37 +774,37 @@ function posterHtml(item, opts) {
   const gradient = item.posterPath ? '' : `background: linear-gradient(150deg, hsl(${hue},45%,22%), hsl(${hue},55%,12%));`;
   const heart = opts.withHeart
     ? `<button class="heart-btn" onclick="event.stopPropagation(); toggleFavorite('${item.id}')" title="Favori">
-         <svg width="13" height="13" viewBox="0 0 24 24" fill="${item.favorite ? 'var(--burgundy-light)' : 'none'}" stroke="${item.favorite ? 'var(--burgundy-light)' : 'var(--text)'}" stroke-width="2.25">
+         <svg width="13" height="13" viewBox="0 0 24 24" fill="${item.favorite ? 'var(--burgundy-light)' : 'none'}" stroke="${item.favorite ? 'var(--burgundy-light)' : '#F5F1E8'}" stroke-width="2.25">
            <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>
          </svg>
        </button>` : '';
   const trash = opts.withHeart
     ? `<button class="heart-btn" style="left:8px;right:auto;" onclick="event.stopPropagation(); deleteItem('${item.id}')" title="Supprimer">
-         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.25">
+         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#F5F1E8" stroke-width="2.25">
            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
          </svg>
        </button>` : '';
   const quickMark = opts.quickMarkId
     ? `<button class="quickmark-btn" onclick="event.stopPropagation(); markNextEpisode('${opts.quickMarkId}')" title="Marquer l'épisode suivant comme vu">
-         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F5F1E8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="20 6 9 17 4 12"/>
          </svg>
        </button>` : '';
   const movieMark = opts.movieMarkId
     ? `<button class="quickmark-btn ${opts.movieWatched?'watched':''}" onclick="event.stopPropagation(); toggleMovieWatched('${opts.movieMarkId}')" title="${opts.movieWatched?'Marqué comme vu':'Marquer comme vu'}">
-         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${opts.movieWatched?'var(--bg)':'var(--text)'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="${opts.movieWatched?'#12101A':'#F5F1E8'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
            <polyline points="20 6 9 17 4 12"/>
          </svg>
        </button>` : '';
   const lpOverlay = (opts.openId && state.longPressItemId === opts.openId) ? `
     <div class="lp-overlay" onclick="event.stopPropagation(); closeLongPressMenu()">
       <button class="lp-icon-btn" onclick="event.stopPropagation(); lpToggleFavorite('${item.id}')" title="${item.favorite?'Retirer des favoris':'Ajouter aux favoris'}">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="${item.favorite ? 'var(--burgundy-light)' : 'none'}" stroke="var(--text)" stroke-width="2">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="${item.favorite ? 'var(--burgundy-light)' : 'none'}" stroke="#F5F1E8" stroke-width="2">
           <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>
         </svg>
       </button>
       <button class="lp-icon-btn" onclick="event.stopPropagation(); lpDelete('${item.id}')" title="Supprimer">
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#F5F1E8" stroke-width="2">
           <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
         </svg>
       </button>
@@ -1038,6 +1058,7 @@ window.toggleProviderSelected = (id) => {
 };
 window.showAllProvidersFor = (id) => { state.showAllProviders[id] = true; render(); };
 window.toggleEpisodeOverview = (key) => { state.expandedOverviews[key] = !state.expandedOverviews[key]; render(); };
+window.clearSearchQuery = () => { setQuery(''); };
 window.setQuery = (v) => {
   state.query = v;
   clearTimeout(state.mainSuggestTimer);
@@ -1052,19 +1073,21 @@ window.setQuery = (v) => {
   state.mainSuggestTimer = setTimeout(async () => {
     if (state.query.trim() !== q) return; // query changed since timer was set
     try {
-      if (state.tab === 'suggestions') {
-        const [movies, series] = await Promise.all([tmdbSearch(q, 'movie'), tmdbSearch(q, 'series')]);
-        const existingIds = new Set(state.items.filter((it) => it.tmdbId).map((it) => it.tmdbId));
-        const merged = [
-          ...movies.map((r) => ({ ...r, __type: 'movie' })),
-          ...series.map((r) => ({ ...r, __type: 'series' })),
-        ].filter((r) => !existingIds.has(r.id)).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-        state.mainSuggestions = merged;
-      } else {
-        const results = await tmdbSearch(q, state.tab);
-        const existingIds = new Set(state.items.filter((it) => it.type === state.tab && it.tmdbId).map((it) => it.tmdbId));
-        state.mainSuggestions = results.filter((r) => !existingIds.has(r.id));
-      }
+      const queries = [q, ...spacingVariants(q)];
+      const calls = queries.flatMap((vq) => [
+        tmdbSearch(vq, 'movie').then((r) => r.map((x) => ({ ...x, __type: 'movie' }))),
+        tmdbSearch(vq, 'series').then((r) => r.map((x) => ({ ...x, __type: 'series' }))),
+      ]);
+      const results = await Promise.all(calls);
+      const existingIds = new Set(state.items.filter((it) => it.tmdbId).map((it) => it.tmdbId));
+      const seen = new Set();
+      const merged = results.flat().filter((r) => {
+        const key = `${r.__type}:${r.id}`;
+        if (seen.has(key) || existingIds.has(r.id)) return false;
+        seen.add(key);
+        return true;
+      }).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+      state.mainSuggestions = merged;
       state.mainSuggestError = null;
     } catch (e) {
       state.mainSuggestions = [];
@@ -1397,13 +1420,61 @@ function buildItemFromNorm(norm, type) {
   return { ...base, seasons, nextEpisodeDate: norm.nextEpisodeDate || null, airedCount: norm.airedCount, episodeRuntime: norm.episodeRuntime || null, tmdbStatus: norm.tmdbStatus || null };
 }
 
-window.confirmAddSelected = () => {
+async function maybeOfferCollection(item, norm) {
+  if (item.type !== 'movie' || !norm.collectionId) return;
+  try {
+    const url = `https://api.themoviedb.org/3/collection/${norm.collectionId}?api_key=${encodeURIComponent(state.apiKey)}&language=fr-FR`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    const parts = data.parts || [];
+    const existingIds = new Set(state.items.filter((i) => i.type === 'movie' && i.tmdbId).map((i) => i.tmdbId));
+    const missing = parts.filter((p) => p.id !== item.tmdbId && !existingIds.has(p.id));
+    if (!missing.length) return;
+    state.collectionOffer = {
+      sourceTitle: item.title,
+      name: data.name,
+      movies: missing.map((p) => ({
+        id: p.id, title: p.title, posterPath: p.poster_path || '', overview: p.overview || '',
+        releaseDate: p.release_date || '', year: (p.release_date || '').slice(0, 4),
+        selected: true,
+      })),
+    };
+    render();
+  } catch (e) { /* non-critical — fail silently */ }
+}
+window.toggleCollectionMovie = (id) => {
+  if (!state.collectionOffer) return;
+  const m = state.collectionOffer.movies.find((x) => x.id === id);
+  if (m) m.selected = !m.selected;
+  render();
+};
+window.closeCollectionOffer = () => { state.collectionOffer = null; render(); };
+window.confirmCollectionAdd = () => {
+  if (!state.collectionOffer) return;
+  const selected = state.collectionOffer.movies.filter((m) => m.selected);
+  const newItems = selected.map((p) => ({
+    id: 'c' + Date.now() + Math.floor(Math.random() * 1000) + p.id,
+    title: p.title, type: 'movie', year: p.year ? parseInt(p.year, 10) : '',
+    status: 'to_watch', rating: 0, review: '', favorite: false,
+    tmdbId: p.id, posterPath: p.posterPath || '', synopsis: p.overview || '',
+    releaseDate: p.releaseDate || '', addedAt: Date.now(),
+  }));
+  state.items = [...newItems, ...state.items];
+  persistItems();
+  state.collectionOffer = null;
+  render();
+};
+
+window.confirmAddSelected = async () => {
   const norm = state.addSelected;
   if (!norm) return;
   const item = buildItemFromNorm(norm, state.tab);
   state.items = [item, ...state.items];
   persistItems();
   state.showAdd = false;
+  render();
+  await maybeOfferCollection(item, norm);
   render();
 };
 
@@ -1416,8 +1487,8 @@ window.quickAddFromSuggestion = async (tmdbId, explicitType) => {
     const item = buildItemFromNorm(norm, type);
     state.items = [item, ...state.items];
     persistItems();
-    state.query = '';
-    state.mainSuggestions = [];
+    state.mainSuggestions = state.mainSuggestions.filter((r) => r.id !== tmdbId);
+    await maybeOfferCollection(item, norm);
   } catch (e) {
     alert("Ajout impossible : " + e.message);
   }
@@ -1521,10 +1592,11 @@ function mainSuggestDropdownHtml() {
     const year = (date || '').slice(0, 4);
     const poster = r.poster_path ? `<img src="${TMDB_IMG}${r.poster_path}" />` : `<div class="ph"></div>`;
     const adding = state.mainAdding === r.id;
-    const typeBadge = r.__type ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted-dark);">${r.__type==='movie'?'Film':'Série'}</span>` : '';
+    const typeBadge = `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);background:var(--bg-alt);border:1px solid var(--border);border-radius:999px;padding:2px 7px;white-space:nowrap;">${type==='movie'?'Film':'Série'}</span>`;
     return `<div class="suggest-item">
       ${poster}
-      <div class="info"><div class="st">${esc(title)}</div><div class="sy">${year} ${typeBadge}</div></div>
+      <div class="info"><div class="st">${esc(title)}</div><div class="sy">${year}</div></div>
+      ${typeBadge}
       <button class="suggest-add-btn" ${adding?'disabled':''} onclick="quickAddFromSuggestion(${r.id},'${type}')">${adding ? '...' : '+ Ajouter'}</button>
     </div>`;
   }).join('');
@@ -2184,7 +2256,7 @@ function render() {
   } else if (isSuggestions) {
     const searchBar = `
       <div class="search-row">
-        <div class="search-box"><input id="main-search-input" placeholder="Rechercher un film ou une série..." value="${esc(state.query)}" oninput="setQuery(this.value)" /></div>
+        <div class="search-box"><input id="main-search-input" placeholder="Rechercher un film ou une série..." value="${esc(state.query)}" oninput="setQuery(this.value)" />${state.query ? `<button class="search-clear-btn" onclick="clearSearchQuery()" title="Effacer">✕</button>` : ""}</div>
         ${mainSuggestDropdownHtml()}
       </div>
     `;
@@ -2194,7 +2266,7 @@ function render() {
       <div class="type-segmented">${typeSegmentedHtml}</div>
 
       <div class="search-row">
-        <div class="search-box"><input id="main-search-input" placeholder="${state.tab==='movie'?'Rechercher un film...':'Rechercher une série...'}" value="${esc(state.query)}" oninput="setQuery(this.value)" /></div>
+        <div class="search-box"><input id="main-search-input" placeholder="${state.tab==='movie'?'Rechercher un film...':'Rechercher une série...'}" value="${esc(state.query)}" oninput="setQuery(this.value)" />${state.query ? `<button class="search-clear-btn" onclick="clearSearchQuery()" title="Effacer">✕</button>` : ""}</div>
         <button class="btn-gold" onclick="openAdd()">+ Ajouter</button>
         ${mainSuggestDropdownHtml()}
       </div>
@@ -2248,6 +2320,7 @@ function render() {
   if (state.detailItemId) html += detailModalHtml(findItem(state.detailItemId));
   if (state.reviewItemId) html += reviewModalHtml(findItem(state.reviewItemId));
   if (state.actorModal) html += actorModalHtml(state.actorModal);
+  if (state.collectionOffer) html += collectionOfferModalHtml(state.collectionOffer);
 
   document.getElementById('app').innerHTML = html;
   bindRatingSetters();
@@ -2564,6 +2637,35 @@ function actorEntryHtml(e) {
   return `<div class="search-result" style="cursor:default;">${poster}<div class="info"><div class="st">${esc(e.title)}</div><div class="sy">${year}</div></div></div>`;
 }
 
+
+function collectionOfferModalHtml(offer) {
+  const rows = offer.movies.map((m) => `
+    <label style="display:flex;align-items:center;gap:10px;padding:8px 4px;cursor:pointer;border-bottom:1px solid var(--border);">
+      <input type="checkbox" ${m.selected?'checked':''} onchange="toggleCollectionMovie(${m.id})" style="width:17px;height:17px;flex-shrink:0;accent-color:var(--gold);" />
+      ${m.posterPath
+        ? `<img src="${TMDB_IMG}${m.posterPath}" style="width:36px;height:54px;object-fit:cover;border-radius:6px;flex-shrink:0;" />`
+        : `<div style="width:36px;height:54px;background:var(--bg-alt);border-radius:6px;flex-shrink:0;"></div>`}
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.title)}</div>
+        <div style="font-size:11px;color:var(--muted-dark);">${esc(m.year)}</div>
+      </div>
+    </label>
+  `).join('');
+  const selectedCount = offer.movies.filter((m) => m.selected).length;
+  return `<div class="overlay" onclick="closeCollectionOffer()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-pad">
+        <div style="font-family:Georgia, serif;font-size:18px;margin-bottom:4px;">${esc(offer.name)}</div>
+        <div style="font-size:12px;color:var(--muted-dark);margin-bottom:16px;">"${esc(offer.sourceTitle)}" fait partie de cette saga — choisis les films à ajouter.</div>
+        <div style="max-height:50vh;overflow-y:auto;margin-bottom:16px;">${rows}</div>
+        <div style="display:flex;gap:8px;">
+          <button class="ghost-btn" style="flex:1;" onclick="closeCollectionOffer()">Annuler</button>
+          <button class="primary-btn" style="flex:2;" ${selectedCount===0?'disabled':''} onclick="confirmCollectionAdd()">Ajouter la sélection (${selectedCount})</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
 
 function actorModalHtml(m) {
   const photo = m.profilePath
