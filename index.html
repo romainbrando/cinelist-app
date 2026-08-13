@@ -59,7 +59,7 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     padding: 28px 16px 60px;
   }
-  .wrap { max-width: 900px; margin: 0 auto; }
+  .wrap { max-width: 1800px; margin: 0 auto; }
   .app-shell { display: flex; min-height: 100vh; }
   .sidebar { width: 220px; flex-shrink: 0; background: var(--card); border-right: 1px solid var(--border); padding: 18px 14px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; }
   .sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 6px 8px 20px; }
@@ -115,7 +115,7 @@
   .search-box { flex: 1; display: flex; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; }
   .search-clear-btn { background: none; border: none; color: var(--muted-dark); font-size: 14px; cursor: pointer; padding: 4px 2px; flex-shrink: 0; }
   .search-clear-btn:hover { color: var(--text); }
-  .search-box input { flex: 1; background: none; border: none; color: var(--text); padding: 10px 8px; font-size: 14px; }
+  .search-box input { flex: 1; background: none; border: none; color: var(--text); padding: 10px 8px; font-size: 14px; outline: none; }
   .btn-gold { display: flex; align-items: center; gap: 6px; background: var(--gold); color: var(--bg); border: none; border-radius: 10px; padding: 0 16px; font-weight: 600; font-size: 14px; cursor: pointer; }
   .suggest-dropdown { position: absolute; top: calc(100% + 6px); left: 0; right: 68px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 6px; z-index: 30; max-height: 320px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
   .suggest-item { display: flex; align-items: center; gap: 10px; padding: 7px; border-radius: 8px; }
@@ -134,6 +134,19 @@
   .chip.fav.active { border-color: var(--burgundy-light); background: rgba(179,59,78,0.12); color: var(--burgundy-light); }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .banner-list { display: flex; flex-direction: column; gap: 10px; }
+  .suggest-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
+  body.layout-mobile .suggest-row { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 12px; padding-bottom: 6px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+  body.layout-mobile .suggest-row > div { flex-shrink: 0; width: 108px; scroll-snap-align: start; }
+  .banner-row { position: relative; display: flex; align-items: center; gap: 12px; border-radius: 14px; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); cursor: pointer; }
+  .banner-poster { width: 46px; height: 68px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: var(--bg-alt); }
+  .banner-count { font-family: Georgia, serif; font-size: 24px; font-weight: 700; color: var(--gold); flex-shrink: 0; width: 54px; min-width: 54px; text-align: center; overflow: hidden; }
+  .banner-info { flex: 1; min-width: 0; }
+  .banner-title { font-size: 14.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .banner-episode { font-size: 12.5px; color: var(--text); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .banner-sub { font-size: 11.5px; color: var(--muted-dark); margin-top: 2px; }
+  .banner-check { flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--bg-alt); border: 1.5px solid var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .banner-check.done { background: var(--gold); border-color: var(--gold); }
   .grid.compact { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
   .ticket { background: var(--card); border-radius: 14px; overflow: hidden; border: 1px solid var(--border); display: flex; flex-direction: column; transition: transform 150ms ease, border-color 150ms ease; cursor: pointer; position: relative; }
   .ticket.expanded { z-index: 30; overflow: visible; }
@@ -231,6 +244,7 @@ const LS_COMPACT = 'cinelist_compact_v1';
 const LS_FOOTER_STYLE = 'cinelist_footer_style_v1';
 const LS_LANGUAGE = 'cinelist_language_v1';
 const LS_DISPLAY_MODE = 'cinelist_display_mode_v1';
+const LS_CARD_STYLE = 'cinelist_card_style_v1';
 const LS_PROVIDERS = 'cinelist_providers_v1';
 
 function makeSeason(number, episodeCount, watchedCount) {
@@ -281,6 +295,7 @@ let state = {
   footerStyle: localStorage.getItem(LS_FOOTER_STYLE) || 'remaining', // 'remaining' | 'nextEpisode'
   language: localStorage.getItem(LS_LANGUAGE) || 'fr', // 'fr' | 'en'
   displayMode: localStorage.getItem(LS_DISPLAY_MODE) || 'auto', // 'auto' | 'mobile' | 'web'
+  cardStyle: localStorage.getItem(LS_CARD_STYLE) || 'grid', // 'grid' | 'banner'
   selectedProviderIds: JSON.parse(localStorage.getItem(LS_PROVIDERS) || '[]'),
   showAllProviders: {}, // itemId -> bool (reveal full unfiltered list)
   expandedOverviews: {}, // `${itemId}:${seasonNumber}:${epIdx}` -> bool
@@ -377,6 +392,17 @@ function seriesProgress(item) {
 function isSeriesOngoing(item) {
   const s = (item.tmdbStatus || '').trim();
   return s === 'Returning Series' || s === 'In Production' || s === 'Planned';
+}
+function seriesBadgeInfo(item) {
+  const status = seriesStatus(item);
+  const meta = SERIES_STATUS[status];
+  const isUp = isUpcomingSeries(item);
+  const { watched, total } = seriesProgress(item);
+  const caughtUpAndOngoing = watched > 0 && watched >= total && isSeriesOngoing(item);
+  const isCanceled = status === 'watched' && item.tmdbStatus === 'Canceled';
+  const label = isUp ? 'Bientôt dispo' : caughtUpAndOngoing ? 'À jour' : isCanceled ? 'Annulée' : meta.label;
+  const color = isUp ? 'var(--gold)' : caughtUpAndOngoing ? 'var(--gold)' : isCanceled ? 'var(--muted-dark)' : meta.color;
+  return { label, color };
 }
 function seriesStatus(item) {
   const { watched, total } = seriesProgress(item);
@@ -730,6 +756,7 @@ function normalizeTmdb(details, type) {
     title: type === 'movie' ? details.title : details.name,
     year: year ? parseInt(year, 10) : '',
     posterPath: details.poster_path || '',
+    backdropPath: details.backdrop_path || '',
     synopsis: details.overview || '',
     director, studio, country, genre, castList, seasons,
     tmdbId: details.id, nextEpisodeDate, airedCount, releaseDate, episodeRuntime, runtime, tmdbStatus,
@@ -849,6 +876,60 @@ function countdownLabel(days, prefix) {
   if (days === 1) return `${prefix} demain`;
   if (days === 0) return `${prefix} aujourd'hui`;
   return '';
+}
+
+function ticketBannerHtml(item) {
+  const posterThumb = item.posterPath
+    ? `<img src="${TMDB_IMG}${item.posterPath}" class="banner-poster" alt="" />`
+    : `<div class="banner-poster" style="${posterHue(item.title)}display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text);">${esc(initials(item.title))}</div>`;
+
+  const { watched, total } = seriesProgress(item);
+  const airedCount = (typeof item.airedCount === 'number') ? item.airedCount : total;
+  const remainingAired = Math.max(0, airedCount - watched);
+  const nextEp = findNextEpisode(item);
+  let epTitle = '';
+  let epSub = '';
+  if (nextEp) {
+    const seasons = item.seasons || [];
+    const seasonNum = seasons[nextEp.seasonIdx].number;
+    const epNum = nextEp.epIdx + 1;
+    epSub = `Saison ${seasonNum}, Épisode ${epNum}`;
+    const cacheKey = `${item.tmdbId}:${seasonNum}`;
+    const cached = EPISODE_CACHE[cacheKey];
+    if (Array.isArray(cached)) {
+      const meta = cached.find((e) => e.number === epNum);
+      epTitle = meta && meta.title ? meta.title : '';
+      if (meta && meta.airDate) epSub += ` · ${formatDateFr(meta.airDate)}`;
+    } else if (item.tmdbId) {
+      ensureSeasonEpisodesLoaded(item, nextEp.seasonIdx);
+    }
+  }
+  const badge = seriesBadgeInfo(item);
+  const badgeIsUpcoming = badge.label === 'Bientôt dispo';
+  const badgeText = (badgeIsUpcoming && item.nextEpisodeDate) ? `${badge.label} · ${formatDateFr(item.nextEpisodeDate)}` : badge.label;
+
+  let countdownText = '';
+  if (!nextEp && !badgeIsUpcoming && item.nextEpisodeDate) {
+    const days = Math.ceil((new Date(item.nextEpisodeDate + 'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+    if (days > 1) countdownText = `Prochain épisode dans ${days} jours`;
+    else if (days === 1) countdownText = `Prochain épisode demain`;
+    else if (days === 0) countdownText = `Prochain épisode aujourd'hui`;
+  }
+
+  return `<div class="banner-row" onclick="openDetail('${item.id}')">
+    <div class="banner-count">${remainingAired > 0 ? remainingAired : ''}</div>
+    ${posterThumb}
+    <div class="banner-info">
+      <div class="banner-title">${esc(item.title)}</div>
+      ${epTitle ? `<div class="banner-episode">${esc(epTitle)}</div>` : ''}
+      ${epSub ? `<div class="banner-sub">${epSub}</div>`
+        : countdownText ? `<div class="banner-sub" style="color:var(--gold);font-weight:600;">${countdownText}</div>`
+        : `<div class="banner-sub" style="color:${badge.color};font-weight:600;">${badgeText}</div>`}
+    </div>
+    ${nextEp ? `<button class="banner-check" onclick="event.stopPropagation(); markNextEpisode('${item.id}')" title="Marquer comme vu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </button>` : ''}
+  </div>`;
 }
 
 function ticketHtml(item) {
@@ -1106,7 +1187,17 @@ window.toggleFavorite = (id) => { const it = findItem(id); updateItem({ ...it, f
 window.markAllWatched = (id) => {
   const item = findItem(id);
   if (!item) return;
-  const seasons = (item.seasons || []).map((s) => ({ ...s, episodes: s.episodes.map(() => true) }));
+  const { total } = seriesProgress(item);
+  const airedCount = (typeof item.airedCount === 'number') ? item.airedCount : total;
+  let cum = 0;
+  const seasons = (item.seasons || []).map((s) => ({
+    ...s,
+    episodes: s.episodes.map((watched) => {
+      const shouldMark = cum < airedCount;
+      cum++;
+      return shouldMark ? true : watched;
+    }),
+  }));
   updateItem({ ...item, seasons });
 };
 window.setPoster = (id, filePath) => {
@@ -1222,7 +1313,7 @@ window.refreshFromTmdb = async (id) => {
       }
     });
     seasons.sort((a, b) => a.number - b.number);
-    updateItem({ ...item, seasons, nextEpisodeDate: norm.nextEpisodeDate || null, airedCount: norm.airedCount, episodeRuntime: norm.episodeRuntime || item.episodeRuntime || null, tmdbStatus: norm.tmdbStatus || null });
+    updateItem({ ...item, seasons, nextEpisodeDate: norm.nextEpisodeDate || null, airedCount: norm.airedCount, episodeRuntime: norm.episodeRuntime || item.episodeRuntime || null, tmdbStatus: norm.tmdbStatus || null, backdropPath: norm.backdropPath || item.backdropPath || '' });
     alert('Infos actualisées depuis TMDB.');
   } catch (e) {
     alert("Actualisation impossible : " + e.message);
@@ -1409,7 +1500,7 @@ function buildItemFromNorm(norm, type) {
   const base = {
     id: 'c' + Date.now() + Math.floor(Math.random()*1000), title: norm.title, type, year: norm.year,
     rating: 0, review: '', favorite: false,
-    posterPath: norm.posterPath, synopsis: norm.synopsis, director: norm.director,
+    posterPath: norm.posterPath, backdropPath: norm.backdropPath || '', synopsis: norm.synopsis, director: norm.director,
     cast: norm.castList || [], studio: norm.studio, country: norm.country, genre: norm.genre,
     tmdbId: norm.tmdbId, addedAt: Date.now(),
   };
@@ -1825,14 +1916,14 @@ function suggestionCardHtml(result, type) {
   const poster = result.poster_path
     ? `<img src="${TMDB_IMG}${result.poster_path}" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:10px;display:block;" />`
     : `<div style="width:100%;aspect-ratio:2/3;background:var(--bg-alt);border-radius:10px;"></div>`;
-  const typeBadge = type === 'series' ? `<span style="position:absolute;top:6px;left:6px;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;background:rgba(18,16,26,0.65);color:var(--muted);padding:2px 6px;border-radius:999px;">Série</span>` : '';
+  const typeBadge = type === 'series' ? `<span style="position:absolute;top:6px;left:6px;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;background:rgba(18,16,26,0.65);color:#D8D3E8;padding:2px 6px;border-radius:999px;">Série</span>` : '';
   return `<div>
     <div style="position:relative;">
       ${poster}
       ${typeBadge}
       <button onclick="quickAddSuggestion(${result.id},'${type}')" ${busy?'disabled':''} title="Ajouter à ma liste"
-        style="position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;background:rgba(18,16,26,0.55);border:1.5px solid rgba(245,241,232,0.5);display:flex;align-items:center;justify-content:center;cursor:pointer;">
-        ${busy ? `<span style="font-size:12px;color:var(--text);">...</span>` : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`}
+        style="position:absolute;bottom:6px;right:6px;width:30px;height:30px;border-radius:50%;background:rgba(18,16,26,0.55);border:1.5px solid rgba(245,241,232,0.5);display:flex;align-items:center;justify-content:center;cursor:pointer;">
+        ${busy ? `<span style="font-size:12px;color:#F5F1E8;">...</span>` : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5F1E8" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`}
       </button>
     </div>
     <div style="font-size:11.5px;color:var(--text);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(title)}</div>
@@ -1850,15 +1941,26 @@ function suggestionRowHtml(data, existingIds, resolveType, loadMoreCall, section
     return `<div style="font-size:12.5px;color:var(--muted-dark);">Impossible de charger pour l'instant.</div>`;
   }
   const filtered = data.results.filter((r) => !existingIds.has(r.id));
-  const expanded = !!state.suggestionExpanded[sectionKey];
+  const isMobileNow = document.body.classList.contains('layout-mobile');
+  const expanded = isMobileNow || !!state.suggestionExpanded[sectionKey];
   const displayed = expanded ? filtered : filtered.slice(0, SUGGESTION_DISPLAY_LIMIT);
 
+  const loadMoreTile = (isMobileNow && data.hasMore) ? `
+    <div>
+      <button onclick="${loadMoreCall}" ${data.loadingMore?'disabled':''} style="width:100%;aspect-ratio:2/3;border-radius:10px;background:var(--bg-alt);border:1px dashed var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;color:var(--muted);">
+        <span style="font-size:20px;">${data.loadingMore ? '···' : '＋'}</span>
+        <span style="font-size:10.5px;text-align:center;padding:0 6px;">${data.loadingMore ? 'Chargement...' : 'Charger plus'}</span>
+      </button>
+    </div>` : '';
+
   const grid = displayed.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(110px, 1fr));gap:14px;">${displayed.map((r) => suggestionCardHtml(r, resolveType(r))).join('')}</div>`
+    ? `<div class="suggest-row" id="suggest-row-${sectionKey}">${displayed.map((r) => suggestionCardHtml(r, resolveType(r))).join('')}${loadMoreTile}</div>`
     : `<div style="font-size:12.5px;color:var(--muted-dark);">Rien de nouveau à suggérer pour l'instant.</div>`;
 
   let buttons = '';
-  if (!expanded) {
+  if (isMobileNow) {
+    // 'Charger plus' now lives at the end of the horizontal scroll (loadMoreTile above) — nothing to render below.
+  } else if (!expanded) {
     if (filtered.length > SUGGESTION_DISPLAY_LIMIT || data.hasMore) {
       buttons = `<button class="ghost-btn" style="width:100%;margin-top:12px;" onclick="expandSuggestionSection('${sectionKey}')">Afficher plus</button>`;
     }
@@ -1946,7 +2048,8 @@ function suggestionsHtml() {
 
   const catContent = cat === 'series' ? seriesSection : filmsSection;
 
-  return `<div style="display:flex;gap:6px;margin-bottom:16px;">${catTabs}</div>${catContent}`;
+  return `<div style="display:flex;gap:6px;margin-bottom:16px;">${catTabs}</div>
+    ${catContent}`;
 }
 
 function settingsHtml() {
@@ -1979,6 +2082,14 @@ function settingsHtml() {
         <button class="chip ${state.displayMode==='auto'?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setDisplayMode('auto')">Automatique</button>
         <button class="chip ${state.displayMode==='mobile'?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setDisplayMode('mobile')">📱 Mobile</button>
         <button class="chip ${state.displayMode==='web'?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setDisplayMode('web')">🖥️ Web</button>
+      </div>
+    </div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 20px;margin-bottom:14px;">
+      <div style="font-family:Georgia, serif;font-size:15px;margin-bottom:4px;">Style d'affichage des séries</div>
+      <div style="font-size:11.5px;color:var(--muted-dark);margin-bottom:10px;">Grille d'affiches classique, ou liste en bannières horizontales avec le prochain épisode à voir. Ne concerne que l'onglet Séries — les films restent en grille.</div>
+      <div style="display:flex;gap:8px;">
+        <button class="chip ${state.cardStyle==='grid'?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setCardStyle('grid')">🔲 Grille</button>
+        <button class="chip ${state.cardStyle==='banner'?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setCardStyle('banner')">▬ Bannière</button>
       </div>
     </div>
     <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 20px;margin-bottom:14px;">
@@ -2168,6 +2279,11 @@ window.toggleMobileSearch = () => {
     setTimeout(() => { const el = document.getElementById('main-search-input'); if (el) el.focus(); }, 50);
   }
 };
+window.setCardStyle = (v) => {
+  state.cardStyle = v;
+  localStorage.setItem(LS_CARD_STYLE, v);
+  render();
+};
 window.setDisplayMode = (v) => {
   state.displayMode = v;
   localStorage.setItem(LS_DISPLAY_MODE, v);
@@ -2187,6 +2303,8 @@ function render() {
 
   const dropdownScrolls = {};
   document.querySelectorAll('.season-dropdown[id], #detail-modal-scroll').forEach((el) => { dropdownScrolls[el.id] = el.scrollTop; });
+  const horizScrolls = {};
+  document.querySelectorAll('.suggest-row[id]').forEach((el) => { horizScrolls[el.id] = el.scrollLeft; });
 
   const isStats = state.tab === 'stats';
   const isProfile = state.tab === 'profile';
@@ -2279,7 +2397,9 @@ function render() {
 
       ${filtered.length === 0
         ? `<div class="empty"><div class="t">Écran vide</div><div>Rien ici pour l'instant — ajoute ${state.tab==='movie'?'un film':'une série'} ou change les filtres.</div></div>`
-        : `<div class="grid ${state.compactView?'compact':''}">${filtered.map(ticketHtml).join('')}</div>`
+        : (state.cardStyle === 'banner' && state.tab === 'series' && state.statusFilter !== 'favorite' && state.statusFilter !== 'watched')
+          ? `<div class="banner-list">${filtered.map(ticketBannerHtml).join('')}</div>`
+          : `<div class="grid ${state.compactView?'compact':''}">${filtered.map(ticketHtml).join('')}</div>`
       }
     `;
   }
@@ -2304,7 +2424,7 @@ function render() {
       <div class="mobile-topbar">${mobileTopBarHtml}</div>
       <div class="mobile-bottombar">${mobileBottomBarHtml}</div>
       <div class="main-content">
-        <div class="wrap" style="margin:0;max-width:900px;">
+        <div class="wrap" style="margin:0;max-width:1800px;">
           <h1 class="page-title">${TAB_META[state.tab].title}</h1>
           ${pageSub ? `<div class="page-sub">${pageSub}</div>` : ''}
 
@@ -2338,6 +2458,10 @@ function render() {
   Object.keys(dropdownScrolls).forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.scrollTop = dropdownScrolls[id];
+  });
+  Object.keys(horizScrolls).forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollLeft = horizScrolls[id];
   });
 }
 
