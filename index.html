@@ -134,11 +134,12 @@
   .chip.fav.active { border-color: var(--burgundy-light); background: rgba(179,59,78,0.12); color: var(--burgundy-light); }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
-  .banner-list { display: flex; flex-direction: column; gap: 10px; }
+  .banner-list { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
   .suggest-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
   body.layout-mobile .suggest-row { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 12px; padding-bottom: 6px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
   body.layout-mobile .suggest-row > div { flex-shrink: 0; width: 108px; scroll-snap-align: start; }
-  .banner-row { position: relative; display: flex; align-items: center; gap: 12px; border-radius: 14px; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); cursor: pointer; }
+  .banner-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; border-bottom: 1px solid var(--border); }
+  .banner-row:last-child { border-bottom: none; }
   .banner-poster { width: 46px; height: 68px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: var(--bg-alt); }
   .banner-count { font-family: Georgia, serif; font-size: 24px; font-weight: 700; color: var(--gold); flex-shrink: 0; width: 54px; min-width: 54px; text-align: center; overflow: hidden; }
   .banner-info { flex: 1; min-width: 0; }
@@ -246,6 +247,7 @@ const LS_LANGUAGE = 'cinelist_language_v1';
 const LS_DISPLAY_MODE = 'cinelist_display_mode_v1';
 const LS_CARD_STYLE = 'cinelist_card_style_v1';
 const LS_NEW_ARCH = 'cinelist_new_arch_v1';
+const LS_PLAYLISTS = 'cinelist_playlists_v1';
 const LS_PROVIDERS = 'cinelist_providers_v1';
 
 function makeSeason(number, episodeCount, watchedCount) {
@@ -298,6 +300,18 @@ let state = {
   displayMode: localStorage.getItem(LS_DISPLAY_MODE) || 'auto', // 'auto' | 'mobile' | 'web'
   cardStyle: localStorage.getItem(LS_CARD_STYLE) || 'grid', // 'grid' | 'banner'
   newArchitecture: localStorage.getItem(LS_NEW_ARCH) === 'true', // experimental mobile nav (Séries/Films/Recherche/Favoris/Stats + sectioned lists)
+  playlists: JSON.parse(localStorage.getItem(LS_PLAYLISTS) || '[]'), // [{id, name, movieIds: [tmdbId-or-localId,...]}]
+  filmsSubTab: 'movies', // 'movies' | 'playlists'
+  activePlaylistId: null,
+  showNewPlaylist: false,
+  newPlaylistName: '',
+  showAddToPlaylist: null, // playlist id currently picking movies for
+  playlistMenuOpen: null, // playlist id whose ⋯ menu is open
+  renamingPlaylistId: null,
+  playlistSearchQuery: '',
+  playlistSearchResults: [],
+  playlistSearchAdding: null,
+  playlistSearchTimer: null,
   selectedProviderIds: JSON.parse(localStorage.getItem(LS_PROVIDERS) || '[]'),
   showAllProviders: {}, // itemId -> bool (reveal full unfiltered list)
   expandedOverviews: {}, // `${itemId}:${seasonNumber}:${epIdx}` -> bool
@@ -305,6 +319,8 @@ let state = {
   suggestionAdding: null, // `${type}:${tmdbId}` currently being added
   showImportPaste: false,
   collectionOffer: null, // { sourceTitle, name, movies: [{id,title,posterPath,overview,releaseDate,year,selected}] }
+  collapsedSections: {}, // { sectionKey: true } — collapsed En cours/À voir/Terminée etc. sections
+  epNotAvailable: null, // { key: '${itemId}:${seasonIdx}:${epIdx}', text } — temporary bubble when clicking an episode that hasn't aired
   mobileSearchOpen: false,
   suggestionGenre: null, // selected genre id for the "Top genre" section (set on first load)
   suggestionCategory: 'series', // 'series' | 'movie' — which tab is shown
@@ -315,6 +331,7 @@ let state = {
 function persistItems() { localStorage.setItem(LS_KEY, JSON.stringify(state.items)); }
 function persistKey() { localStorage.setItem(LS_API, state.apiKey); }
 function persistWatchLog() { localStorage.setItem(LS_LOG, JSON.stringify(state.watchLog)); }
+function persistPlaylists() { localStorage.setItem(LS_PLAYLISTS, JSON.stringify(state.playlists)); }
 
 function globalWatchTotals(items) {
   let minutes = 0;
@@ -880,30 +897,38 @@ function countdownLabel(days, prefix) {
   return '';
 }
 
-function sectionBlockHtml(label, items, allowBanner) {
+function sectionBlockHtml(label, items, allowBanner, sectionKey) {
   if (!items.length) return '';
+  const collapsed = !!state.collapsedSections[sectionKey];
   const useBanner = allowBanner && state.cardStyle === 'banner';
   const content = useBanner
     ? `<div class="banner-list">${items.map(ticketBannerHtml).join('')}</div>`
     : `<div class="grid ${state.compactView?'compact':''}">${items.map(ticketHtml).join('')}</div>`;
   return `<div style="margin-bottom:26px;">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
-      <span style="font-family:Georgia, serif;font-size:16px;color:var(--text);">${label}</span>
+    <div onclick="toggleSectionCollapse('${sectionKey}')" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;cursor:pointer;">
+      <span style="font-family:Georgia, serif;font-size:16px;color:var(--text);display:flex;align-items:center;gap:7px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--muted-dark)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(${collapsed?-90:0}deg);transition:transform 150ms ease;flex-shrink:0;"><polyline points="6 9 12 15 18 9"/></svg>
+        ${label}
+      </span>
       <span style="font-size:12px;color:var(--muted-dark);">${items.length}</span>
     </div>
-    ${content}
-    <div style="height:1px;margin-top:20px;background:linear-gradient(90deg, transparent, var(--gold-dim), transparent);"></div>
+    ${collapsed ? '' : `${content}<div style="height:1px;margin-top:20px;background:linear-gradient(90deg, transparent, var(--gold-dim), transparent);"></div>`}
   </div>`;
 }
 function sectionedSeriesHtml() {
   const q = state.query.trim().toLowerCase();
   const seriesItems = state.items.filter((it) => it.type === 'series' && (!q || it.title.toLowerCase().includes(q)));
-  const groups = { watching: [], to_watch: [], watched: [] };
-  seriesItems.forEach((it) => { const s = seriesStatus(it); (groups[s] = groups[s] || []).push(it); });
+  const groups = { watching: [], to_watch: [], watched: [], upcoming: [] };
+  seriesItems.forEach((it) => {
+    if (isUpcomingSeries(it)) { groups.upcoming.push(it); return; }
+    const s = seriesStatus(it);
+    (groups[s] = groups[s] || []).push(it);
+  });
   const out = [
-    sectionBlockHtml('En cours', sortItems(groups.watching), true),
-    sectionBlockHtml('À voir', sortItems(groups.to_watch), true),
-    sectionBlockHtml('Terminée', sortItems(groups.watched), true),
+    sectionBlockHtml('En cours', sortItems(groups.watching), true, 'series-watching'),
+    sectionBlockHtml('À voir', sortItems(groups.to_watch), true, 'series-to_watch'),
+    sectionBlockHtml('Bientôt dispo', sortItems(groups.upcoming), true, 'series-upcoming'),
+    sectionBlockHtml('Terminée', sortItems(groups.watched), true, 'series-watched'),
   ].join('');
   return out.trim() ? out : `<div class="empty"><div class="t">Écran vide</div><div>Ajoute une série pour commencer.</div></div>`;
 }
@@ -913,8 +938,8 @@ function sectionedMovieHtml() {
   const groups = { to_watch: [], watched: [] };
   movieItems.forEach((it) => { (groups[it.status] = groups[it.status] || []).push(it); });
   const out = [
-    sectionBlockHtml('À voir', sortItems(groups.to_watch), false),
-    sectionBlockHtml('Terminé', sortItems(groups.watched), false),
+    sectionBlockHtml('À voir', sortItems(groups.to_watch), false, 'movie-to_watch'),
+    sectionBlockHtml('Terminé', sortItems(groups.watched), false, 'movie-watched'),
   ].join('');
   return out.trim() ? out : `<div class="empty"><div class="t">Écran vide</div><div>Ajoute un film pour commencer.</div></div>`;
 }
@@ -923,8 +948,8 @@ function favoritesPageHtml() {
   const favSeries = sortItems(favs.filter((it) => it.type === 'series'));
   const favMovies = sortItems(favs.filter((it) => it.type === 'movie'));
   const out = [
-    sectionBlockHtml('Séries', favSeries, true),
-    sectionBlockHtml('Films', favMovies, false),
+    sectionBlockHtml('Séries', favSeries, true, 'fav-series'),
+    sectionBlockHtml('Films', favMovies, false, 'fav-movies'),
   ].join('');
   return out.trim() ? out : `<div class="empty"><div class="t">Aucun favori</div><div>Ajoute des favoris depuis une fiche ou une vignette.</div></div>`;
 }
@@ -978,7 +1003,7 @@ function ticketBannerHtml(item) {
         : `<div class="banner-sub" style="color:${badge.color};font-weight:600;">${badgeText}</div>`}
     </div>
     ${nextEp ? `<button class="banner-check" onclick="event.stopPropagation(); markNextEpisode('${item.id}')" title="Marquer comme vu">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
     </button>` : ''}
   </div>`;
 }
@@ -1152,6 +1177,7 @@ window.setTab = (t) => {
   state.tab = t;
   state.statusFilter = 'all';
   state.mobileSearchOpen = (t === 'suggestions');
+  if (t !== 'movie') { state.filmsSubTab = 'movies'; state.activePlaylistId = null; }
   render();
   if (t === 'settings') ensureProviderListLoaded();
   if (t === 'suggestions') ensureSuggestionsLoaded();
@@ -1306,10 +1332,33 @@ window.toggleSeasonExpand = async (id, idx) => {
   await ensureSeasonEpisodesLoaded(item, idx);
   render();
 };
+let EP_NA_TIMER = null;
 window.toggleEpisode = (id, seasonIdx, epIdx) => {
   const item = findItem(id);
   const seasons = item.seasons || [];
   const willBeWatched = !seasons[seasonIdx].episodes[epIdx];
+  if (willBeWatched) {
+    const total = seasons.reduce((s, se) => s + se.episodes.length, 0);
+    const airedCount = (typeof item.airedCount === 'number') ? item.airedCount : total;
+    let cum = 0;
+    for (let i = 0; i < seasonIdx; i++) cum += seasons[i].episodes.length;
+    cum += epIdx;
+    if (cum >= airedCount) {
+      const seasonNum = seasons[seasonIdx].number;
+      const cacheKey = item.tmdbId ? `${item.tmdbId}:${seasonNum}` : null;
+      const cached = cacheKey ? EPISODE_CACHE[cacheKey] : null;
+      let dateText = '';
+      if (Array.isArray(cached)) {
+        const meta = cached.find((e) => e.number === epIdx + 1);
+        if (meta && meta.airDate) dateText = formatDateShortFr(meta.airDate);
+      }
+      state.epNotAvailable = { key: `${id}:${seasonIdx}:${epIdx}`, text: dateText ? `Dispo le ${dateText}` : "Pas encore disponible" };
+      render();
+      clearTimeout(EP_NA_TIMER);
+      EP_NA_TIMER = setTimeout(() => { state.epNotAvailable = null; render(); }, 2500);
+      return;
+    }
+  }
   const newSeasons = seasons.map((s, i) => {
     if (i < seasonIdx) {
       // Earlier seasons: marking watched fills them entirely; unmarking leaves them untouched.
@@ -1428,6 +1477,7 @@ window.openDetail = (id) => {
   } else if (item) {
     ensureProvidersLoaded(item);
     ensurePostersLoaded(item);
+    ensureTrailerLoaded(item);
   }
   render();
   if (currentIdx !== null) {
@@ -1442,8 +1492,7 @@ window.setDetailTab = (t) => {
   render();
   const item = findItem(state.detailItemId);
   if (!item) return;
-  if (t === 'details') { ensureProvidersLoaded(item); ensurePostersLoaded(item); }
-  if (t === 'trailer') { ensureTrailerLoaded(item); }
+  if (t === 'details') { ensureProvidersLoaded(item); ensurePostersLoaded(item); ensureTrailerLoaded(item); }
 };
 let SW_START_Y = null;
 let SW_START_TIME = null;
@@ -1563,7 +1612,7 @@ function buildItemFromNorm(norm, type) {
   return { ...base, seasons, nextEpisodeDate: norm.nextEpisodeDate || null, airedCount: norm.airedCount, episodeRuntime: norm.episodeRuntime || null, tmdbStatus: norm.tmdbStatus || null };
 }
 
-async function maybeOfferCollection(item, norm) {
+async function maybeOfferCollection(item, norm, targetPlaylistId) {
   if (item.type !== 'movie' || !norm.collectionId) return;
   try {
     const url = `https://api.themoviedb.org/3/collection/${norm.collectionId}?api_key=${encodeURIComponent(state.apiKey)}&language=fr-FR`;
@@ -1577,6 +1626,7 @@ async function maybeOfferCollection(item, norm) {
     state.collectionOffer = {
       sourceTitle: item.title,
       name: data.name,
+      targetPlaylistId: targetPlaylistId || null,
       movies: missing.map((p) => ({
         id: p.id, title: p.title, posterPath: p.poster_path || '', overview: p.overview || '',
         releaseDate: p.release_date || '', year: (p.release_date || '').slice(0, 4),
@@ -1605,6 +1655,12 @@ window.confirmCollectionAdd = () => {
   }));
   state.items = [...newItems, ...state.items];
   persistItems();
+  const targetPlaylistId = state.collectionOffer.targetPlaylistId;
+  if (targetPlaylistId) {
+    const newIds = newItems.map((it) => it.id);
+    state.playlists = state.playlists.map((p) => p.id === targetPlaylistId ? { ...p, movieIds: [...p.movieIds, ...newIds] } : p);
+    persistPlaylists();
+  }
   state.collectionOffer = null;
   render();
 };
@@ -2123,14 +2179,6 @@ function settingsHtml() {
   `).join('');
   return `
     <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 20px;margin-bottom:14px;">
-      <div style="font-family:Georgia, serif;font-size:15px;margin-bottom:4px;">Architecture (expérimental) 🧪</div>
-      <div style="font-size:11.5px;color:var(--muted-dark);margin-bottom:10px;">Uniquement en mode mobile : navigation Séries/Films/Recherche/Favoris/Stats en bas, listes organisées par statut (En cours, À voir, Terminée). Réversible à tout moment.</div>
-      <div style="display:flex;gap:8px;">
-        <button class="chip ${!state.newArchitecture?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setNewArchitecture(false)">Classique</button>
-        <button class="chip ${state.newArchitecture?'active':''}" style="flex:1;justify-content:center;padding:9px 0;" onclick="setNewArchitecture(true)">Nouvelle</button>
-      </div>
-    </div>
-    <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 20px;margin-bottom:14px;">
       <div style="font-family:Georgia, serif;font-size:15px;margin-bottom:4px;">Affichage</div>
       <div style="font-size:11.5px;color:var(--muted-dark);margin-bottom:10px;">Taille des cartes dans les listes Films et Séries.</div>
       <div style="display:flex;gap:8px;">
@@ -2342,18 +2390,113 @@ window.toggleMobileSearch = () => {
     setTimeout(() => { const el = document.getElementById('main-search-input'); if (el) el.focus(); }, 50);
   }
 };
+window.setFilmsSubTab = (v) => { state.filmsSubTab = v; state.activePlaylistId = null; render(); };
+window.toggleSectionCollapse = (key) => { state.collapsedSections[key] = !state.collapsedSections[key]; render(); };
+window.openNewPlaylist = () => { state.showNewPlaylist = true; state.newPlaylistName = ''; render(); };
+window.closeNewPlaylist = () => { state.showNewPlaylist = false; render(); };
+window.setNewPlaylistName = (v) => { state.newPlaylistName = v; };
+window.confirmNewPlaylist = () => {
+  const name = (state.newPlaylistName || '').trim();
+  if (!name) return;
+  const pl = { id: 'pl' + Date.now() + Math.floor(Math.random()*1000), name, movieIds: [] };
+  state.playlists = [pl, ...state.playlists];
+  persistPlaylists();
+  state.showNewPlaylist = false;
+  state.filmsSubTab = 'playlists';
+  state.activePlaylistId = pl.id;
+  render();
+};
+window.openPlaylist = (id) => { state.activePlaylistId = id; render(); };
+window.closePlaylist = () => { state.activePlaylistId = null; render(); };
+window.deletePlaylist = (id) => {
+  const pl = state.playlists.find((p) => p.id === id);
+  if (!pl) return;
+  if (!confirm(`Supprimer la playlist "${pl.name}" ? Les films eux-mêmes resteront dans ta liste.`)) return;
+  state.playlists = state.playlists.filter((p) => p.id !== id);
+  persistPlaylists();
+  state.activePlaylistId = null;
+  state.playlistMenuOpen = null;
+  render();
+};
+window.togglePlaylistMenu = (id) => { state.playlistMenuOpen = state.playlistMenuOpen === id ? null : id; render(); };
+window.startRenamePlaylist = (id) => {
+  const pl = state.playlists.find((p) => p.id === id);
+  if (!pl) return;
+  state.playlistMenuOpen = null;
+  state.renamingPlaylistId = id;
+  state.newPlaylistName = pl.name;
+  render();
+};
+window.closeRenamePlaylist = () => { state.renamingPlaylistId = null; render(); };
+window.confirmRenamePlaylist = () => {
+  const id = state.renamingPlaylistId;
+  const name = (state.newPlaylistName || '').trim();
+  if (!id || !name) return;
+  state.playlists = state.playlists.map((p) => p.id === id ? { ...p, name } : p);
+  persistPlaylists();
+  state.renamingPlaylistId = null;
+  render();
+};
+window.openAddToPlaylist = (id) => { state.showAddToPlaylist = id; state.playlistSearchQuery = ''; state.playlistSearchResults = []; render(); };
+window.setPlaylistSearchQuery = (v) => {
+  state.playlistSearchQuery = v;
+  clearTimeout(state.playlistSearchTimer);
+  const q = v.trim();
+  if (q.length < 2 || !state.apiKey) { state.playlistSearchResults = []; render(); return; }
+  render();
+  state.playlistSearchTimer = setTimeout(async () => {
+    if (state.playlistSearchQuery.trim() !== q) return;
+    try {
+      const results = await tmdbSearch(q, 'movie');
+      const existingIds = new Set(state.items.filter((it) => it.type === 'movie' && it.tmdbId).map((it) => it.tmdbId));
+      state.playlistSearchResults = results.filter((r) => !existingIds.has(r.id));
+    } catch (e) {
+      state.playlistSearchResults = [];
+    }
+    render();
+  }, 400);
+};
+window.addNewMovieToPlaylist = async (tmdbId) => {
+  const playlistId = state.showAddToPlaylist;
+  if (!playlistId) return;
+  state.playlistSearchAdding = tmdbId; render();
+  try {
+    const details = await tmdbDetails(tmdbId, 'movie');
+    const norm = normalizeTmdb(details, 'movie');
+    const item = buildItemFromNorm(norm, 'movie');
+    state.items = [item, ...state.items];
+    persistItems();
+    state.playlists = state.playlists.map((p) => p.id === playlistId ? { ...p, movieIds: [...p.movieIds, item.id] } : p);
+    persistPlaylists();
+    state.playlistSearchResults = state.playlistSearchResults.filter((r) => r.id !== tmdbId);
+    await maybeOfferCollection(item, norm, playlistId);
+  } catch (e) {
+    alert("Ajout impossible : " + e.message);
+  }
+  state.playlistSearchAdding = null;
+  render();
+};
+window.closeAddToPlaylist = () => { state.showAddToPlaylist = null; render(); };
+window.togglePlaylistMovie = (playlistId, itemId) => {
+  state.playlists = state.playlists.map((p) => {
+    if (p.id !== playlistId) return p;
+    const has = p.movieIds.includes(itemId);
+    return { ...p, movieIds: has ? p.movieIds.filter((x) => x !== itemId) : [...p.movieIds, itemId] };
+  });
+  persistPlaylists();
+  render();
+};
+window.removeFromPlaylist = (playlistId, itemId) => {
+  state.playlists = state.playlists.map((p) => p.id === playlistId ? { ...p, movieIds: p.movieIds.filter((x) => x !== itemId) } : p);
+  persistPlaylists();
+  render();
+};
 window.setCardStyle = (v) => {
   state.cardStyle = v;
   localStorage.setItem(LS_CARD_STYLE, v);
   render();
 };
 window.toggleCardStyleQuick = () => { setCardStyle(state.cardStyle === 'grid' ? 'banner' : 'grid'); };
-window.setNewArchitecture = (v) => {
-  state.newArchitecture = v;
-  localStorage.setItem(LS_NEW_ARCH, v ? 'true' : 'false');
-  if (v && !['series','movie','suggestions','favorites','stats','settings','profile'].includes(state.tab)) state.tab = 'series';
-  render();
-};
 window.setDisplayMode = (v) => {
   state.displayMode = v;
   localStorage.setItem(LS_DISPLAY_MODE, v);
@@ -2411,10 +2554,11 @@ function render() {
     statusChips = Object.entries(statusMeta).map(([key, m]) => chipHtml(key, m)).join('');
   }
 
-  const TOP_TABS = state.newArchitecture ? ['settings', 'profile'] : ['settings', 'stats', 'profile'];
+  const isMobileLayoutNow = document.body.classList.contains('layout-mobile');
+  const TOP_TABS = isMobileLayoutNow ? ['settings', 'profile'] : ['settings', 'stats', 'profile'];
   const TYPE_TABS = ['series', 'movie'];
   let mobileBottomBarHtml;
-  if (state.newArchitecture) {
+  {
     const NEW_BOTTOM = [
       { key: 'series', icon: NAV_ICONS.series, label: 'Séries' },
       { key: 'movie', icon: NAV_ICONS.movie, label: 'Films' },
@@ -2423,20 +2567,6 @@ function render() {
       { key: 'stats', icon: NAV_ICONS.stats, label: 'Stats' },
     ];
     mobileBottomBarHtml = NEW_BOTTOM.map((t) => `<button class="mobile-nav-icon mobile-nav-icon-lg ${state.tab===t.key?'active':''}" onclick="setTab('${t.key}')" title="${t.label}">${t.icon}</button>`).join('');
-  } else {
-    const MOBILE_STATUS_ICONS = state.tab === 'movie' ? [
-      { key: 'to_watch', icon: NAV_ICONS.to_watch, label: 'À voir' },
-      { key: 'watched', icon: NAV_ICONS.watched, label: 'Terminé' },
-      { key: 'favorite', icon: NAV_ICONS.favorite, label: 'Favoris' },
-    ] : [
-      { key: 'watching', icon: NAV_ICONS.watching, label: 'En cours' },
-      { key: 'to_watch', icon: NAV_ICONS.to_watch, label: 'À voir' },
-      { key: 'watched', icon: NAV_ICONS.watched, label: 'Terminé' },
-      { key: 'favorite', icon: NAV_ICONS.favorite, label: 'Favoris' },
-    ];
-    mobileBottomBarHtml = MOBILE_STATUS_ICONS.map((s) => {
-      return `<button class="mobile-nav-icon mobile-nav-icon-lg ${state.statusFilter===s.key?'active':''}" onclick="setMobileStatusFilter('${s.key}')" title="${s.label}">${s.icon}</button>`;
-    }).join('') + `<button class="mobile-nav-icon mobile-nav-icon-lg ${state.mobileSearchOpen?'active':''}" onclick="toggleMobileSearch()" title="Rechercher">${NAV_ICONS.search}</button>`;
   }
   const mobileTopBarHtml = TOP_TABS.map((key) => {
     const m = TAB_META[key];
@@ -2468,9 +2598,16 @@ function render() {
       <div style="display:flex;justify-content:flex-end;margin-bottom:14px;">${cardStyleToggleBtn}</div>
       ${favoritesPageHtml()}
     `;
-  } else if (state.newArchitecture) {
+  } else if (isMobileLayoutNow && state.tab === 'movie' && state.filmsSubTab === 'playlists') {
     mainContent = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">${cardStyleToggleBtn}</div>
+      ${filmsSubTabToggleHtml()}
+      ${playlistsSectionHtml()}
+    `;
+  } else if (isMobileLayoutNow) {
+    mainContent = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">${cardStyleToggleBtn}</div>
+      ${state.tab === 'movie' ? filmsSubTabToggleHtml() : ''}
       <div class="search-row">
         <div class="search-box"><input id="main-search-input" placeholder="${state.tab==='movie'?'Rechercher un film...':'Rechercher une série...'}" value="${esc(state.query)}" oninput="setQuery(this.value)" />${state.query ? `<button class="search-clear-btn" onclick="clearSearchQuery()" title="Effacer">✕</button>` : ""}</div>
         <button class="btn-gold" onclick="openAdd()">+ Ajouter</button>
@@ -2478,9 +2615,15 @@ function render() {
       </div>
       ${state.tab === 'series' ? sectionedSeriesHtml() : sectionedMovieHtml()}
     `;
+  } else if (state.tab === 'movie' && state.filmsSubTab === 'playlists') {
+    mainContent = `
+      ${filmsSubTabToggleHtml()}
+      ${playlistsSectionHtml()}
+    `;
   } else {
     mainContent = `
       <div class="type-segmented">${typeSegmentedHtml}</div>
+      ${state.tab === 'movie' ? filmsSubTabToggleHtml() : ''}
 
       <div class="search-row">
         <div class="search-box"><input id="main-search-input" placeholder="${state.tab==='movie'?'Rechercher un film...':'Rechercher une série...'}" value="${esc(state.query)}" oninput="setQuery(this.value)" />${state.query ? `<button class="search-clear-btn" onclick="clearSearchQuery()" title="Effacer">✕</button>` : ""}</div>
@@ -2539,6 +2682,9 @@ function render() {
   if (state.detailItemId) html += detailModalHtml(findItem(state.detailItemId));
   if (state.reviewItemId) html += reviewModalHtml(findItem(state.reviewItemId));
   if (state.actorModal) html += actorModalHtml(state.actorModal);
+  if (state.showNewPlaylist) html += newPlaylistModalHtml();
+  if (state.renamingPlaylistId) html += renamePlaylistModalHtml();
+  if (state.showAddToPlaylist) html += addToPlaylistModalHtml();
   if (state.collectionOffer) html += collectionOfferModalHtml(state.collectionOffer);
 
   document.getElementById('app').innerHTML = html;
@@ -2652,15 +2798,23 @@ function episodeRowsHtml(item, seasonIdx, season) {
       const overviewStyle = overviewExpanded
         ? 'white-space:normal;overflow:visible;'
         : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      const naKey = `${item.id}:${seasonIdx}:${epIdx}`;
+      const naBubble = (state.epNotAvailable && state.epNotAvailable.key === naKey)
+        ? `<div style="position:absolute;bottom:calc(100% + 6px);right:0;background:var(--burgundy-light);color:#fff;font-size:11px;font-weight:600;padding:6px 10px;border-radius:8px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:5;">${esc(state.epNotAvailable.text)}<div style="position:absolute;top:100%;right:12px;width:8px;height:8px;background:var(--burgundy-light);transform:rotate(45deg);margin-top:-4px;"></div></div>`
+        : '';
       return `<div class="episode-row" style="${hasOverview?'cursor:pointer;':''}" ${hasOverview ? `onclick="toggleEpisodeOverview('${overviewKey}')"` : ''}>
         ${thumb}
         <div class="episode-info">
           <div class="episode-title">${epIdx+1}. ${esc(meta.title || `Épisode ${epIdx+1}`)}</div>
           <div class="episode-overview" style="${overviewStyle}">${overviewText}</div>
+          ${meta.airDate ? `<div style="font-size:11px;color:var(--muted-dark);margin-top:1px;">${formatDateShortFr(meta.airDate)}</div>` : ''}
         </div>
-        <button class="episode-check ${watched?'watched':''}" onclick="event.stopPropagation(); toggleEpisode('${item.id}',${seasonIdx},${epIdx})" title="${watched?'Vu':'Marquer comme vu'}">
-          ${watched ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
-        </button>
+        <div style="position:relative;">
+          ${naBubble}
+          <button class="episode-check ${watched?'watched':''}" onclick="event.stopPropagation(); toggleEpisode('${item.id}',${seasonIdx},${epIdx})" title="${watched?'Vu':'Marquer comme vu'}">
+            ${watched ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--bg)" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
+          </button>
+        </div>
       </div>`;
     }).join('') + `</div>`;
   }
@@ -2738,6 +2892,12 @@ function formatDateFr(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   if (isNaN(d)) return dateStr;
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function formatDateShortFr(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d)) return dateStr;
+  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function cinemaBlockHtml(releaseDate) {
@@ -2861,6 +3021,135 @@ function actorEntryHtml(e) {
 }
 
 
+function filmsSubTabToggleHtml() {
+  return `<div style="display:flex;gap:8px;margin-bottom:14px;">
+    <button class="chip ${state.filmsSubTab==='movies'?'active':''}" onclick="setFilmsSubTab('movies')">🎬 Films</button>
+    <button class="chip ${state.filmsSubTab==='playlists'?'active':''}" onclick="setFilmsSubTab('playlists')">📃 Playlists (${state.playlists.length})</button>
+  </div>`;
+}
+function playlistTileHtml(pl) {
+  const movies = pl.movieIds.map((id) => findItem(id)).filter(Boolean);
+  const covers = movies.slice(0, 4);
+  const cells = covers.map((m) => m.posterPath
+    ? `<img src="${TMDB_IMG}${m.posterPath}" style="width:100%;height:100%;object-fit:cover;" />`
+    : `<div style="background:var(--bg-alt);width:100%;height:100%;"></div>`
+  ).concat(Array.from({ length: Math.max(0, 4 - covers.length) }, () => `<div style="background:var(--bg-alt);width:100%;height:100%;"></div>`)).join('');
+  const mosaic = movies.length
+    ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:1px;width:100%;height:100%;">${cells}</div>`
+    : `<div style="width:100%;height:100%;background:var(--bg-alt);display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--muted-dark);">📁</div>`;
+  return `<div onclick="openPlaylist('${pl.id}')" style="cursor:pointer;">
+    <div style="aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:var(--card);border:1px solid var(--border);">${mosaic}</div>
+    <div style="font-size:12px;color:var(--text);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(pl.name)}</div>
+    <div style="font-size:10px;color:var(--muted-dark);">${pl.movieIds.length} film${pl.movieIds.length>1?'s':''}</div>
+  </div>`;
+}
+function playlistMovieCardHtml(item, playlistId) {
+  return `<div>
+    ${ticketHtml(item)}
+    <button onclick="removeFromPlaylist('${playlistId}','${item.id}')" style="width:100%;margin-top:4px;background:none;border:none;color:var(--muted-dark);font-size:10.5px;text-decoration:underline;cursor:pointer;">Retirer de la playlist</button>
+  </div>`;
+}
+function playlistsSectionHtml() {
+  if (state.activePlaylistId) {
+    const pl = state.playlists.find((p) => p.id === state.activePlaylistId);
+    if (!pl) { state.activePlaylistId = null; }
+    else {
+      const movies = pl.movieIds.map((mid) => findItem(mid)).filter(Boolean);
+      return `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;position:relative;">
+          <button onclick="closePlaylist()" class="ghost-btn" style="width:auto;padding:6px 12px;">← Retour</button>
+          <div style="flex:1;font-family:Georgia, serif;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(pl.name)}</div>
+          <button onclick="event.stopPropagation(); togglePlaylistMenu('${pl.id}')" title="Options" style="width:36px;height:36px;border-radius:9px;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;">⋯</button>
+          ${state.playlistMenuOpen === pl.id ? `
+            <div style="position:absolute;top:42px;right:0;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,0.3);overflow:hidden;z-index:10;min-width:150px;">
+              <button onclick="startRenamePlaylist('${pl.id}')" style="display:block;width:100%;text-align:left;padding:11px 14px;background:none;border:none;color:var(--text);font-size:13px;cursor:pointer;">✎ Renommer</button>
+              <button onclick="deletePlaylist('${pl.id}')" style="display:block;width:100%;text-align:left;padding:11px 14px;background:none;border:none;color:var(--burgundy-light);font-size:13px;cursor:pointer;border-top:1px solid var(--border);">🗑 Supprimer</button>
+            </div>` : ''}
+        </div>
+        <button class="btn-gold" style="width:100%;margin-bottom:16px;" onclick="openAddToPlaylist('${pl.id}')">+ Ajouter des films</button>
+        ${movies.length === 0
+          ? `<div class="empty"><div class="t">Playlist vide</div><div>Ajoute des films depuis le bouton ci-dessus.</div></div>`
+          : `<div class="grid ${state.compactView?'compact':''}">${movies.map((m) => playlistMovieCardHtml(m, pl.id)).join('')}</div>`}
+      `;
+    }
+  }
+  const newTile = `<div onclick="openNewPlaylist()" style="aspect-ratio:2/3;border-radius:12px;border:1.5px dashed var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;color:var(--muted);">
+    <span style="font-size:28px;">＋</span>
+    <span style="font-size:12px;">Nouvelle playlist</span>
+  </div>`;
+  return `<div class="grid ${state.compactView?'compact':''}">${newTile}${state.playlists.map(playlistTileHtml).join('')}</div>`;
+}
+function newPlaylistModalHtml() {
+  return `<div class="overlay" onclick="closeNewPlaylist()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-pad">
+        <div style="font-family:Georgia, serif;font-size:17px;margin-bottom:14px;">Nouvelle playlist</div>
+        <input type="text" id="new-playlist-input" value="${esc(state.newPlaylistName)}" oninput="setNewPlaylistName(this.value)" placeholder="Nom de la playlist" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-alt);color:var(--text);font-size:14px;margin-bottom:16px;box-sizing:border-box;" />
+        <div style="display:flex;gap:8px;">
+          <button class="ghost-btn" style="flex:1;" onclick="closeNewPlaylist()">Annuler</button>
+          <button class="primary-btn" style="flex:1;" onclick="confirmNewPlaylist()">Créer</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function renamePlaylistModalHtml() {
+  return `<div class="overlay" onclick="closeRenamePlaylist()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-pad">
+        <div style="font-family:Georgia, serif;font-size:17px;margin-bottom:14px;">Renommer la playlist</div>
+        <input type="text" id="rename-playlist-input" value="${esc(state.newPlaylistName)}" oninput="setNewPlaylistName(this.value)" placeholder="Nom de la playlist" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-alt);color:var(--text);font-size:14px;margin-bottom:16px;box-sizing:border-box;" />
+        <div style="display:flex;gap:8px;">
+          <button class="ghost-btn" style="flex:1;" onclick="closeRenamePlaylist()">Annuler</button>
+          <button class="primary-btn" style="flex:1;" onclick="confirmRenamePlaylist()">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function addToPlaylistModalHtml() {
+  const pl = state.playlists.find((p) => p.id === state.showAddToPlaylist);
+  if (!pl) return '';
+  const available = state.items.filter((it) => it.type === 'movie');
+  const rows = available.map((m) => {
+    const checked = pl.movieIds.includes(m.id);
+    return `<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;cursor:pointer;border-bottom:1px solid var(--border);">
+      <input type="checkbox" ${checked?'checked':''} onchange="togglePlaylistMovie('${pl.id}','${m.id}')" style="width:17px;height:17px;flex-shrink:0;accent-color:var(--gold);" />
+      ${m.posterPath ? `<img src="${TMDB_IMG}${m.posterPath}" style="width:32px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;" />` : `<div style="width:32px;height:48px;background:var(--bg-alt);border-radius:6px;flex-shrink:0;"></div>`}
+      <div style="flex:1;min-width:0;"><div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.title)}</div><div style="font-size:11px;color:var(--muted-dark);">${m.year||''}</div></div>
+    </label>`;
+  }).join('');
+  const searchResultsHtml = state.playlistSearchQuery.trim().length >= 2 ? `
+    <div style="margin-bottom:14px;">
+      ${state.playlistSearchResults.length === 0
+        ? `<div style="font-size:12px;color:var(--muted-dark);padding:6px 0;">Aucun nouveau film trouvé pour "${esc(state.playlistSearchQuery)}".</div>`
+        : state.playlistSearchResults.map((r) => {
+            const busy = state.playlistSearchAdding === r.id;
+            const year = (r.release_date || '').slice(0, 4);
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);">
+              ${r.poster_path ? `<img src="${TMDB_IMG}${r.poster_path}" style="width:32px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;" />` : `<div style="width:32px;height:48px;background:var(--bg-alt);border-radius:6px;flex-shrink:0;"></div>`}
+              <div style="flex:1;min-width:0;"><div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.title)}</div><div style="font-size:11px;color:var(--muted-dark);">${year}</div></div>
+              <button onclick="addNewMovieToPlaylist(${r.id})" ${busy?'disabled':''} class="suggest-add-btn">${busy?'...':'+ Ajouter'}</button>
+            </div>`;
+          }).join('')}
+    </div>` : '';
+  return `<div class="overlay" onclick="closeAddToPlaylist()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-pad">
+        <div style="font-family:Georgia, serif;font-size:17px;margin-bottom:14px;">Ajouter à "${esc(pl.name)}"</div>
+        <div class="search-box" style="margin-bottom:12px;">
+          <input type="text" id="playlist-search-input" placeholder="Chercher un nouveau film à ajouter..." value="${esc(state.playlistSearchQuery)}" oninput="setPlaylistSearchQuery(this.value)" />
+          ${state.playlistSearchQuery ? `<button class="search-clear-btn" onclick="setPlaylistSearchQuery('')" title="Effacer">✕</button>` : ''}
+        </div>
+        ${searchResultsHtml}
+        <div style="font-size:10.5px;letter-spacing:0.5px;text-transform:uppercase;color:var(--muted-dark);margin-bottom:6px;">Déjà dans ta liste</div>
+        <div style="max-height:45vh;overflow-y:auto;margin-bottom:14px;">${rows || `<div style="font-size:12.5px;color:var(--muted-dark);">Aucun film dans ta liste pour l'instant.</div>`}</div>
+        <button class="primary-btn" style="width:100%;" onclick="closeAddToPlaylist()">Terminé</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function collectionOfferModalHtml(offer) {
   const rows = offer.movies.map((m) => `
     <label style="display:flex;align-items:center;gap:10px;padding:8px 4px;cursor:pointer;border-bottom:1px solid var(--border);">
@@ -2875,11 +3164,12 @@ function collectionOfferModalHtml(offer) {
     </label>
   `).join('');
   const selectedCount = offer.movies.filter((m) => m.selected).length;
+  const playlist = offer.targetPlaylistId ? state.playlists.find((p) => p.id === offer.targetPlaylistId) : null;
   return `<div class="overlay" onclick="closeCollectionOffer()">
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-pad">
         <div style="font-family:Georgia, serif;font-size:18px;margin-bottom:4px;">${esc(offer.name)}</div>
-        <div style="font-size:12px;color:var(--muted-dark);margin-bottom:16px;">"${esc(offer.sourceTitle)}" fait partie de cette saga — choisis les films à ajouter.</div>
+        <div style="font-size:12px;color:var(--muted-dark);margin-bottom:16px;">"${esc(offer.sourceTitle)}" fait partie de cette saga — choisis les films à ajouter.${playlist ? ` Ils seront aussi ajoutés à "${esc(playlist.name)}".` : ''}</div>
         <div style="max-height:50vh;overflow-y:auto;margin-bottom:16px;">${rows}</div>
         <div style="display:flex;gap:8px;">
           <button class="ghost-btn" style="flex:1;" onclick="closeCollectionOffer()">Annuler</button>
@@ -2929,26 +3219,18 @@ function actorModalHtml(m) {
   </div>`;
 }
 
-function trailerTabHtml(item) {
-  if (!item.tmdbId) {
-    return `<div style="font-size:12.5px;color:var(--muted-dark);padding:10px 0;">Pas de bande-annonce disponible pour ce titre ajouté manuellement.</div>`;
-  }
+
+function trailerLinkHtml(item) {
+  if (!item.tmdbId) return '';
   const key = `${item.type}:${item.tmdbId}`;
   const data = TRAILER_CACHE[key];
   if (data === 'loading' || data === undefined) {
-    return `<div style="font-size:12.5px;color:var(--muted-dark);padding:10px 0;">Chargement de la bande-annonce...</div>`;
+    return `<div style="font-size:12.5px;color:var(--muted-dark);margin-bottom:18px;">Recherche de la bande annonce...</div>`;
   }
-  if (!data || data === 'error' || data === 'none') {
-    return `<div style="font-size:12.5px;color:var(--muted-dark);padding:10px 0;">Aucune bande-annonce trouvée.</div>`;
-  }
-  return `<a href="https://www.youtube.com/watch?v=${data.key}" target="_blank" rel="noopener noreferrer" style="display:block;position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:10px;background:var(--bg-alt);text-decoration:none;">
-    <img src="https://img.youtube.com/vi/${data.key}/hqdefault.jpg" alt="${esc(data.name||'Bande annonce')}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;" />
-    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(18,16,26,0.25);">
-      <div style="width:56px;height:56px;border-radius:50%;background:rgba(18,16,26,0.7);border:2px solid rgba(245,241,232,0.8);display:flex;align-items:center;justify-content:center;">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--text)"><polygon points="6 4 20 12 6 20"/></svg>
-      </div>
-    </div>
-    <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(18,16,26,0.75);color:var(--text);font-size:11.5px;padding:6px 10px;">▶ Regarder sur YouTube — ${esc(data.name||'Bande annonce')}</div>
+  if (!data || data === 'error' || data === 'none') return '';
+  return `<a href="https://www.youtube.com/watch?v=${data.key}" target="_blank" rel="noopener noreferrer" style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gold);text-decoration:none;margin-bottom:18px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--gold)"><polygon points="6 4 20 12 6 20"/></svg>
+    Bande annonce
   </a>`;
 }
 
@@ -2963,19 +3245,17 @@ function detailModalHtml(item) {
   if (!isSeries) fields.push({ key: 'releaseDate', label: 'Date de sortie', formatted: true });
   if (isSeries) fields.push({ key: 'tmdbStatus', label: 'Statut TMDB (diagnostic)' });
 
-  const tabs = isSeries ? ['episodes', 'details', 'trailer'] : ['details', 'trailer'];
-  const tabLabels = { episodes: 'Épisodes', details: 'Détails', trailer: 'Bande annonce' };
+  const tabs = isSeries ? ['episodes', 'details'] : ['details'];
+  const tabLabels = { episodes: 'Épisodes', details: 'Détails' };
   const activeTab = tabs.includes(state.detailTab) ? state.detailTab : tabs[0];
 
-  const tabNav = `<div style="display:flex;gap:6px;margin-bottom:16px;">` + tabs.map((t) => `
+  const tabNav = tabs.length > 1 ? `<div style="display:flex;gap:6px;margin-bottom:16px;">` + tabs.map((t) => `
     <button onclick="setDetailTab('${t}')" style="flex:1;padding:8px 4px;border-radius:8px;border:1px solid ${activeTab===t?'var(--gold)':'var(--border)'};background:${activeTab===t?'rgba(232,179,76,0.12)':'none'};color:${activeTab===t?'var(--gold)':'var(--muted)'};font-size:12px;font-weight:${activeTab===t?'600':'400'};cursor:pointer;">${tabLabels[t]}</button>
-  `).join('') + `</div>`;
+  `).join('') + `</div>` : '';
 
   let tabContent;
   if (activeTab === 'episodes') {
     tabContent = seasonsEditorHtml(item);
-  } else if (activeTab === 'trailer') {
-    tabContent = trailerTabHtml(item);
   } else {
     tabContent = `
       <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--gold);margin-bottom:6px;">Synopsis</div>
@@ -2983,6 +3263,7 @@ function detailModalHtml(item) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px;">
         ${fields.map((f) => `<div><div style="font-size:10.5px;letter-spacing:0.5px;text-transform:uppercase;color:var(--muted-dark);margin-bottom:3px;">${f.label}</div><div style="font-size:13px;color:${item[f.key]?'var(--text)':'var(--muted-dark)'};">${esc(f.formatted ? formatDateFr(item[f.key]) : item[f.key])||'—'}</div></div>`).join('')}
       </div>
+      ${trailerLinkHtml(item)}
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:18px;padding:12px 14px;background:var(--bg-alt);border-radius:12px;">
         <div>
           <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--gold);margin-bottom:6px;">Note</div>
